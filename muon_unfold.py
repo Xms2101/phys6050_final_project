@@ -1,6 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-#import seaborn as sns
 import uproot
 from pyunfold import iterative_unfold
 from pyunfold.callbacks import Logger
@@ -11,13 +10,12 @@ from pyunfold.callbacks import Logger
 MEV_TO_GEV = 1000.0
 
 # Key parameters
-bins = np.linspace(2, 9, 7) #Make sure these divide well!! Do the math!!
+bins = np.linspace(2, 9, 8) #Make sure these divide well!! Do the math!!
 bin_centers = 0.5 * (bins[:-1] + bins[1:])
 iterations = 13 #max number of iterations
 ts = 1e-3 #chi^2 cut. Best at 1e-2
 
-
-# Files (adjust paths if necessary)
+#pull files
 d_files = 24
 mc_file_count = 7
 mc_files   = [f"data/monte_carlo/1p_mc_snip_{i}.root" for i in range(1, mc_file_count + 1)]
@@ -134,7 +132,7 @@ vtx_y_mc_truth = mc_arr["mc_vtx"][:, 1]
 vtx_z_mc_truth = mc_arr["mc_vtx"][:, 2]
 
 # -------------------------
-# DETECTOR-ONLY MASKS (for response & efficiencies)
+# DETECTOR-ONLY MASKS
 # -------------------------
 # Fiducial
 fid_reco = (
@@ -166,6 +164,7 @@ RECO_all  = mu_E_mc_reco_precut
 
 truth_for_response = TRUTH_all[mc_detector_mask]
 reco_for_response  = RECO_all[mc_detector_mask]
+
 
 # Denominator for efficiency: generated truth in unfolding domain (optionally restrict to fiducial gen)
 denom_for_eff = TRUTH_all[fid_mc]  # truth generated inside fiducial volume
@@ -200,8 +199,8 @@ for i in range(resp_counts.shape[0]):
         resp_matrix[i] = np.zeros(resp_counts.shape[1])
         response_err[i] = np.zeros(resp_counts.shape[1])
 
-#resp_matrix = resp_matrix.T
-#response_err = response_err.T
+print("truth_for_response ",len(truth_for_response))
+print("reco_for_response ", len(reco_for_response))
 
 # Efficiencies
 truth_passed_hist, _ = np.histogram(truth_for_response, bins=bins)
@@ -222,22 +221,28 @@ print("MC passed detector reco in-range:", truth_passed_hist.sum())
 print("efficiencies:", efficiencies)
 
 # -------------------------
-# TRUTH-LEVEL PHYSICS SELECTION (to apply AFTER unfolding)
-# Compute fraction of truth that is signal (physics selection)
+# Physics cuts
 # -------------------------
-# Define the physics-level cuts on MC truth (these are the "signal" selection)
-cut_mu_P_mc       = (mu_P_mc_precut > 1.5)
-cut_mu_charge_mc  = (q_over_p_mc < 0)
-cut_pi_P_mc       = (pi_P_mc > 0.1)
-cut_p_score_mc    = (p_score_mc < 0.4)
-cut_nu_E_mc       = (nu_E_mc > 2.0) & (nu_E_mc < 20.0)
-cut_pi_angle_mc   = (cos_pi_theta_mc > 0.75)
+
+cut_mu_P_mc       = (mu_P_mc_precut > 1.4) # MINOS energy cut
+cut_mu_charge_mc  = (q_over_p_mc < 0) # keep only non-antimatter events
+cut_pi_P_mc       = (pi_P_mc > 0.1) # kinematic. Make sure it's there
+cut_p_score_mc    = (p_score_mc < 0.4) # proton score cut. Ensure likely no protons
+cut_nu_E_mc       = (nu_E_mc > 2.0) & (nu_E_mc < 20.0) # energy cut to keep out heavy flavor decays and good study range
+cut_pi_angle_mc   = (cos_pi_theta_mc > 0.75) # pion has to be moving forwards
 
 t_mc = np.abs((nu_E_mc - mu_E_mc_reco_precut - pi_E_mc_reco)**2 -
               ((mu_P_x_mc + pi_P_x_mc)**2 +
                (mu_P_y_mc + pi_P_y_mc)**2 +
                (nu_E_mc - mu_P_z_mc - pi_P_z_mc)**2))
-cut_t_mc = (t_mc < 0.125)
+cut_t_mc = (t_mc < 0.125) # low |t| means should be no nuclear breakup
+
+t_dat = np.abs((nu_E_reco - mu_E_reco - pi_E_r)**2 -
+              ((mu_P_x_reco + pi_P_x_r)**2 +
+               (mu_P_y_reco + pi_P_y_r)**2 +
+               (nu_E_reco - mu_P_z_reco - pi_P_z_r)**2))
+cut_t_dat = (t_dat < 0.125) # low |t| means should be no nuclear breakup
+
 
 physics_signal_mask_truth = fid_mc & mc_sanity & cut_mu_P_mc & cut_mu_charge_mc & cut_pi_P_mc & cut_p_score_mc & cut_nu_E_mc & cut_pi_angle_mc & cut_t_mc
 
@@ -287,7 +292,7 @@ mc_scale = data_sum / mc_truth_sum
 mc_reco_scaled = mc_reco_hist * mc_scale
 mc_truth_scaled = mc_truth_hist * mc_scale
 
-# scale unfolded to match data integral for plotting (optional)
+# scale unfolded to match data integral for plotting
 unf_sum = np.sum(unf)
 scale_to_data = data_sum / unf_sum if unf_sum > 0 else 1.0
 unf_scaled = unf * scale_to_data
@@ -298,7 +303,6 @@ unf_signal_err_scaled = unf_signal_err * scale_to_data
 # -------------------------
 # PLOTS
 # -------------------------
-#plt.style.use('seaborn-deep')
 
 # 1) Efficiency vs truth energy
 fig, ax = plt.subplots(figsize=(8,4))
@@ -317,40 +321,48 @@ im = ax.imshow(resp_matrix, origin='lower', aspect='auto',
 ax.set_xlabel("Reconstructed muon energy [GeV]")
 ax.set_ylabel("Truth muon energy [GeV]")
 
-ax.set_title("Response matrix P(reco | truth) (row-normalized)")
+ax.set_title("Response matrix P(reco | truth)")
 plt.colorbar(im, ax=ax, label='P(reco|truth)')
 plt.tight_layout()
-#plt.savefig("plots/E_mu_matrix.png")
-#plt.savefig("plots/E_mu_matric_i1")
-#plt.savefig("plots/E_mu_matric_i5")
 plt.savefig(f"plots/E_mu_matrix")
 
 # 3) Observed data vs MC reco vs unfolded
-fig, ax = plt.subplots(figsize=(9,6))
+plt.rcParams.update({
+    "font.size": 14,          # makes the font bigger and easier to read
+    "axes.titlesize": 16,
+    "axes.labelsize": 15,
+    "xtick.labelsize": 13,
+    "ytick.labelsize": 13,
+    "legend.fontsize": 13,
+    "lines.linewidth": 2.5
+})
+
+fig, ax = plt.subplots(figsize=(8,6))
 ax.errorbar(bin_centers, data_hist, yerr=np.sqrt(data_hist), fmt='s', label='Observed data', ms=6, capsize=3, color='k')
-ax.step(bin_centers, mc_reco_scaled, where='mid', lw=2, label='MC Reco', color='C0')
-ax.step(bin_centers, mc_truth_scaled, where='mid', lw=2, alpha=0.6, label='MC Truth', color='C1')
+ax.step(bin_centers, mc_reco_scaled, where='mid', lw=2, label='MC Reco (Scaled)', color='C0')
+ax.step(bin_centers, mc_truth_scaled, where='mid', lw=2, alpha=0.6, label='MC Truth (Scaled)', color='C1')
 ax.errorbar(bin_centers, unf_scaled, yerr=unf_err_scaled, fmt='o', label='Unfolded', ms=6, capsize=3, color='C3')
 ax.set_xlabel("Muon energy [GeV]")
 ax.set_ylabel("Counts")
+plt.ylim([0,100000])
 iteration_text = f'Iterations: {iterations}'
 plt.text(0.92, 0.92, # Coordinates (near bottom-right)
-         iteration_text, 
-         ha='right', # Horizontal alignment
-         va='bottom', # Vertical alignment
-         transform=plt.gca().transAxes, # Use axes coordinates
-         fontsize=15, 
-         bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
+        iteration_text, 
+        ha='right', # Horizontal alignment
+        va='bottom', # Vertical alignment
+        transform=plt.gca().transAxes, # Use axes coordinates
+        fontsize=15, 
+        bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
 
 ax.legend()
+#plt.axvline(x = 2, color = 'r', linewidth=2)
+#plt.axvline(x = 9, color = 'r', linewidth=2)
 plt.tight_layout()
-#plt.savefig("plots/E_mu_full.png")
-#plt.savefig("plots/E_mu_full_i1.png")
+#plt.savefig(f"plots/all_E_mu") # <-- Modify this graph to show total energies
 plt.savefig(f"plots/E_mu_full_i{iterations}")
 
 
-# 4) Unfolded signal-only (apply truth-level physics selection fraction)
-# 4) Unfolded signal vs MC truth (apply truth-level physics selection fraction)
+# 4) Unfolded signal-only
 fig, ax = plt.subplots(figsize=(9,6))
 
 # Unfolded reco signal (with errors)
@@ -382,3 +394,145 @@ plt.show()
 
 print(efficiencies)
 print(efficiencies_err)
+
+
+###################### plot events removed with each cut ######################
+cut_labels = [
+    "All",
+    "Sanity",
+    "Fiducial",
+    "Muon acceptance"
+]
+cuts_mc = [
+    np.ones(len(TRUTH_all), dtype=bool),  # no cut
+    mc_sanity,
+    fid_mc,
+    mu_accept_mc
+]
+cuts_reco = [
+    np.ones(len(mu_E_reco), dtype=bool),  # no cut
+    reco_sanity,
+    fid_reco,
+    mu_accept
+]
+
+cutflow_mc_counts = []
+cutflow_reco_counts = []
+mask_mc = np.ones(len(TRUTH_all), dtype=bool)
+mask_reco = np.ones(len(mu_E_reco), dtype=bool)
+
+for cut in cuts_mc:
+    mask_mc &= cut
+    cutflow_mc_counts.append(mask_mc.sum())
+
+for cut in cuts_reco:
+    mask_reco &= cut
+    cutflow_reco_counts.append(mask_reco.sum())
+
+
+## put on histogram
+plt.rcParams.update({
+    "font.size": 14,          # makes the font bigger and easier to read
+    "axes.titlesize": 16,
+    "axes.labelsize": 15,
+    "xtick.labelsize": 13,
+    "ytick.labelsize": 13,
+    "legend.fontsize": 13,
+    "lines.linewidth": 2.5
+})
+
+x = np.arange(len(cutflow_mc_counts))
+width = 0.65
+
+fig, ax = plt.subplots(figsize=(7.2,6))
+
+ax.bar(x - width/2, cutflow_mc_counts, width=width, alpha=0.7, label="MC Truth")
+ax.bar(x - width/2, cutflow_reco_counts, width=width, alpha=0.7, label="MC Reconstruction")
+
+ax.set_xticks(x)
+ax.set_xticklabels(cut_labels, rotation=20)
+ax.set_ylabel("Remaining Events")
+ax.set_title("Detector-Level Event Removal")
+ax.set_yscale('log')
+ax.set_ylim(bottom=1)
+
+ax.legend()
+ax.grid(axis="y", which="both", linestyle="--", alpha=0.4)
+plt.tight_layout()
+plt.savefig("plots/background_cuts.png")
+plt.show()
+
+
+
+###################### plot physics cuts ######################
+cut_labels = [
+    "All",
+    "Muon Reso", ##include pion momentum here
+    "Muon Charge",
+    "Pion Angle",
+    "Neutrino Energy",
+    "Proton Score",
+    "|t|"
+]
+phys_truth_cuts = [
+    (np.ones(len(mu_E_mc_truth), dtype=bool) & mc_sanity & fid_mc & cut_pi_P_mc),
+    (cut_mu_P_mc),
+    cut_mu_charge_mc,
+    cut_pi_angle_mc,
+    cut_nu_E_mc,
+    cut_p_score_mc,
+    cut_t_mc
+]
+physics_cuts_reco = [
+    (np.ones(len(mu_E_reco), dtype=bool) & reco_sanity & fid_reco & (q_over_p_reco < 0)),
+    mu_accept,
+    (pi_P_r > 0.1),
+    (p_score_reco < 0.4),
+    (nu_E_reco > 2.0) & (nu_E_reco < 20.0),
+    (cos_pi_theta_r > 0.75),
+    cut_t_dat
+]
+
+physics_cutflow_counts = []
+physics_cutflow_reco_counts = []
+
+mask = np.ones(len(mu_E_mc_truth), dtype=bool)
+for cut in phys_truth_cuts:
+    mask &= cut
+    physics_cutflow_counts.append(mask.sum())
+
+mask_reco = np.ones(len(mu_E_reco), dtype=bool)
+for cut in physics_cuts_reco:
+    mask_reco &= cut
+    physics_cutflow_reco_counts.append(mask_reco.sum())
+
+plt.rcParams.update({
+    "font.size": 14,
+    "axes.titlesize": 16,
+    "axes.labelsize": 15,
+    "xtick.labelsize": 13,
+    "ytick.labelsize": 13,
+    "legend.fontsize": 13,
+    "lines.linewidth": 2.5
+})
+
+x = np.arange(len(physics_cutflow_counts))
+width = 0.65
+
+fig, ax = plt.subplots(figsize=(8,6))
+
+ax.bar(x - width/2, physics_cutflow_counts, width=width, alpha=0.7, label="MC Truth")
+ax.bar(x - width/2, physics_cutflow_reco_counts, width=width, alpha=0.7, label="Reconstructed Data")
+
+ax.set_xticks(x)
+ax.set_xticklabels(cut_labels, rotation=30, ha="right")
+ax.set_ylabel("Remaining Events")
+ax.set_title("Physics Cuts")
+ax.set_yscale("log")
+ax.set_ylim(bottom=1)
+
+ax.legend(loc="lower left")
+ax.grid(axis="y", which="both", linestyle="--", alpha=0.4)
+plt.tight_layout()
+plt.savefig("plots/phys_cuts.png")
+plt.show()
